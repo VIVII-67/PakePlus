@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>案卷文书目录生成工具</title>
+    <script src="https://unpkg.com/docx@8.5.0/build/index.umd.js"></script>
+    <style>
+        :root {
+            --primary: #1a5fb4;
+            --primary-hover: #144c91;
+            --bg-body: #f0f2f5;
+            --bg-white: #ffffff;
+            --border: #d9d9d9;
+            --text-main: #333;
+            --text-sub: #666;
+            --shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        * { box-sizing: border-box; outline: none; }
+        body { margin: 0; padding: 0; font-family: "Microsoft YaHei", sans-serif; background: var(--bg-body); color: var(--text-main); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+        .header {
+            height: 60px;
+            background: var(--primary);
+            color: white;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            box-shadow: var(--shadow);
+            z-index: 10;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+        .header h1 { font-size: 18px; margin: 0; font-weight: 500; }
+        .header-actions { display: flex; gap: 10px; }
+
+        .main-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: 240px;
+            background: var(--bg-white);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            padding: 15px;
+            overflow-y: auto;
+            z-index: 5;
+            flex-shrink: 0;
+        }
+        .sidebar-title { font-size: 14px; font-weight: bold; margin-bottom: 10px; color: var(--primary); display: flex; justify-content: space-between; align-items: center; }
+        .template-input-group { display: flex; gap: 5px; margin-bottom: 15px; }
+        .template-input-group input { flex: 1; padding: 5px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; }
+        .template-list { display: flex; flex-wrap: wrap; gap: 8px; }
+        .template-tag {
+            background: #e6f7ff;
+            border: 1px solid #91d5ff;
+            color: var(--primary);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            user-select: none;
+        }
+        .template-tag:hover { background: var(--primary); color: white; border-color: var(--primary); }
+        .template-tag .del-btn { margin-left: 4px; font-weight: bold; opacity: 0.6; }
+        .template-tag .del-btn:hover { opacity: 1; }
+
+        .editor-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-body);
+            overflow: hidden;
+            min-width: 600px;
+        }
+        
+        .toolbar {
+            background: var(--bg-white);
+            padding: 10px 15px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-shrink: 0;
+            z-index: 4;
+        }
+        .input-group { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+        .input-group label { color: var(--text-sub); }
+        .std-input { padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px; transition: border 0.2s; }
+        .std-input:focus { border-color: var(--primary); }
+
+        .table-scroll-wrapper {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            position: relative;
+        }
+
+        .data-table-container {
+            background: var(--bg-white);
+            border-radius: 6px;
+            box-shadow: var(--shadow);
+            overflow: hidden;
+            min-height: 100%;
+        }
+        .data-header {
+            display: grid;
+            grid-template-columns: 50px 120px 2fr 180px 80px 1fr 40px;
+            background: #fafafa;
+            border-bottom: 1px solid var(--border);
+            padding: 10px 15px;
+            font-weight: bold;
+            font-size: 13px;
+            color: var(--text-sub);
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+        .data-row {
+            display: grid;
+            grid-template-columns: 50px 120px 2fr 180px 80px 1fr 40px;
+            padding: 8px 15px;
+            border-bottom: 1px solid #eee;
+            align-items: center;
+            transition: background 0.2s;
+        }
+        .data-row:hover { background: #f0f7ff; }
+        .data-row.dragging { opacity: 0.5; background: #e6f7ff; }
+        
+        .cell-input { width: 100%; border: 1px solid transparent; background: transparent; padding: 4px; border-radius: 2px; font-size: 13px; }
+        .cell-input:hover { border-color: #ddd; background: white; }
+        .cell-input:focus { border-color: var(--primary); background: white; }
+        
+        .date-group { display: flex; gap: 2px; align-items: center; }
+        .date-input { width: 100%; text-align: center; border: 1px solid transparent; background: transparent; padding: 4px 0; border-radius: 2px; font-size: 13px; }
+        .date-input:hover { border-color: #ddd; background: white; }
+        .date-input:focus { border-color: var(--primary); background: white; }
+        .date-separator { color: #ccc; font-size: 12px; }
+
+        .row-index { text-align: center; color: var(--text-sub); font-size: 12px; cursor: grab; }
+        .btn-icon { cursor: pointer; color: #999; text-align: center; }
+        .btn-icon:hover { color: var(--primary); }
+        
+        .btn-add-container {
+            padding: 15px;
+            background: var(--bg-white);
+            border-top: 1px solid #eee;
+        }
+        .btn-add { width: 100%; padding: 10px; border: 1px dashed var(--border); background: white; color: var(--text-sub); cursor: pointer; border-radius: 4px; }
+        .btn-add:hover { border-color: var(--primary); color: var(--primary); }
+
+        .preview-area {
+            width: 350px;
+            background: #525659;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            border-left: 1px solid #333;
+            flex-shrink: 0;
+        }
+        .preview-label { color: #aaa; font-size: 12px; margin-bottom: 10px; align-self: flex-start; }
+        
+        .a4-page {
+            width: 210mm;
+            min-height: 297mm;
+            background: white;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+            padding: 20mm;
+            margin-bottom: 20px;
+            transform-origin: top center;
+            transform: scale(0.65); 
+            margin-top: -50px;
+        }
+        
+        .doc-title { text-align: center; font-family: "SimHei", sans-serif; font-size: 22pt; font-weight: bold; margin-bottom: 20pt; }
+        .doc-table { width: 100%; border-collapse: collapse; font-family: "SimSun", serif; font-size: 10.5pt; }
+        .doc-table th, .doc-table td { border: 1px solid black; padding: 5px; text-align: center; vertical-align: middle; }
+        .doc-table th { background-color: #f0f0f0; font-weight: bold; }
+        .doc-table td.text-left { text-align: left; padding-left: 10px; }
+
+        .btn { padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; transition: 0.2s; }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { background: var(--primary-hover); }
+        .btn-outline { background: transparent; border: 1px solid rgba(255,255,255,0.5); color: white; }
+        .btn-outline:hover { background: rgba(255,255,255,0.1); }
+
+        #loadingMask {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5); z-index: 1000;
+            display: none; justify-content: center; align-items: center; color: white;
+            flex-direction: column;
+        }
+    </style>
+</head>
+<body>
+
+<div id="loadingMask">
+    <div style="font-size: 20px; margin-bottom: 10px;">正在处理...</div>
+    <div id="loadingText" style="font-size: 14px; opacity: 0.8;">请稍候</div>
+</div>
+
+<header class="header">
+    <h1>阳信县疾病预防控制中心（卫生监督站）案卷文书目录生成工具</h1>
+    <div class="header-actions">
+        <button class="btn btn-outline" onclick="importDirProj()" title="导入 .dirproj 项目文件">导入项目</button>
+        <button class="btn btn-outline" onclick="exportDirProj()" title="导出为 .dirproj 项目文件">导出项目</button>
+        <button class="btn btn-outline" onclick="saveTemplate()">保存列表</button>
+        <button class="btn btn-outline" onclick="loadTemplate()">加载列表</button>
+        <button class="btn btn-primary" id="exportBtn" onclick="handleExport()" title="由于网络原因无法加载DOCX库，已切换为复制模式">复制表格 (库加载失败)</button>
+    </div>
+</header>
+
+<div class="main-container">
+    <aside class="sidebar">
+        <div class="sidebar-title">
+            常用文书模板
+            <span style="font-size:12px; font-weight:normal; color:#999; cursor:pointer;" onclick="resetTemplates()" title="重置为默认">重置</span>
+        </div>
+        <div class="template-input-group">
+            <input type="text" id="newTplInput" placeholder="输入名称回车添加">
+            <button class="btn btn-primary" style="padding: 4px 8px;" onclick="addTemplate()">+</button>
+        </div>
+        <div id="templateList" class="template-list"></div>
+        <div style="margin-top: 20px; font-size: 12px; color: #999; line-height: 1.5;">
+            <p>💡 提示：</p>
+            <p>1. 点击左侧模板可填入当前选中的输入框。</p>
+            <p>2. 拖拽序号可调整顺序。</p>
+            <p>3. 页码自动累计计算。</p>
+            <p>4. 使用“导出/导入项目”可跨设备同步完整目录树。</p>
+        </div>
+    </aside>
+
+    <main class="editor-area">
+        <div class="toolbar">
+            <div class="input-group">
+                <label>表格标题：</label>
+                <input type="text" id="docTitleInput" class="std-input" value="卷内文件目录" style="width: 200px;" oninput="updatePreviewTitle(this.value)">
+            </div>
+            <div class="input-group">
+                <label>起始页码：</label>
+                <input type="number" id="startPageInput" class="std-input" value="1" style="width: 60px;" onchange="recalcPages()">
+            </div>
+        </div>
+
+        <div class="table-scroll-wrapper">
+            <div class="data-table-container">
+                <div class="data-header">
+                    <div style="text-align:center">序号</div>
+                    <div>文号/编号</div>
+                    <div>行政处罚文书名称</div>
+                    <div>日期 (YYYY-MM-DD)</div>
+                    <div style="text-align:center">页数</div>
+                    <div>备注</div>
+                    <div></div>
+                </div>
+                <div id="rowsContainer"></div>
+            </div>
+            <div class="btn-add-container">
+                <button class="btn-add" onclick="addRow()">+ 新增条目</button>
+            </div>
+        </div>
+    </main>
+
+    <aside class="preview-area">
+        <div class="preview-label">A4 实时预览</div>
+        <div id="previewContainer"></div>
+    </aside>
+</div>
+
+<script>
+    // --- 数据状态 ---
+    // 初始化清空，确保首次加载界面为空目录状态
+    let rows = [];
+    
+    let templates = JSON.parse(localStorage.getItem('ws_templates')) || [
+        "询问笔录", "行政处罚决定书", "证据先行登记保存决定书", "送达回执", 
+        "阳卫医罚字[2026]第0×号", "现场笔录", "立案报告"
+    ];
+
+    let currentFocusedInput = null;
+    let isDocxLoaded = false;
+
+    // --- 初始化 ---
+    window.onload = function() {
+        checkDocxLib();
+        renderTemplates();
+        renderRows();
+        updatePreview();
+        
+        document.addEventListener('focusin', function(e) {
+            if (e.target.classList.contains('cell-input') || e.target.classList.contains('date-input')) {
+                currentFocusedInput = e.target;
+            }
+        });
+
+        document.getElementById('newTplInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') addTemplate();
+        });
+    };
+
+    function checkDocxLib() {
+        const btn = document.getElementById('exportBtn');
+        setTimeout(() => {
+            if (typeof docx !== 'undefined') {
+                isDocxLoaded = true;
+                btn.innerText = "导出 DOCX";
+                btn.title = "导出为 Word 文档";
+            } else {
+                isDocxLoaded = false;
+                btn.innerText = "复制表格 (库加载失败)";
+                btn.title = "由于网络原因无法加载DOCX库，已切换为复制模式";
+            }
+        }, 1000);
+    }
+
+    // --- 项目导出与导入 (.dirproj) ---
+    function encodeBase64(str) {
+        return btoa(unescape(encodeURIComponent(str)));
+    }
+
+    function decodeBase64(str) {
+        // 移除可能的空白字符以防 atob 报错
+        return decodeURIComponent(escape(atob(str.replace(/\s/g, ''))));
+    }
+
+    function exportDirProj() {
+        const data = {
+            version: "1.0",
+            metadata: {
+                title: document.getElementById('docTitleInput').value,
+                startPage: parseInt(document.getElementById('startPageInput').value) || 1
+            },
+            templates: templates,
+            // 构建目录树结构，包含层级、顺序和展开状态
+            tree: {
+                id: "root",
+                name: "案卷目录",
+                expanded: true,
+                children: rows.map(r => ({
+                    ...r,
+                    expanded: false, // 默认折叠子项
+                    children: []     // 预留子层级结构
+                }))
+            }
+        };
+        
+        const jsonStr = JSON.stringify(data);
+        const base64Str = encodeBase64(jsonStr);
+        
+        // 设置 MIME 类型为 application/vnd.dirproj
+        const blob = new Blob([base64Str], { type: 'application/vnd.dirproj' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${data.metadata.title || '案卷目录'}.dirproj`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    function importDirProj() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.dirproj,application/vnd.dirproj';
+        input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const base64Str = event.target.result;
+                    const jsonStr = decodeBase64(base64Str);
+                    const data = JSON.parse(jsonStr);
+                    
+                    if (data.version !== "1.0") {
+                        alert("不支持的文件版本，请检查文件是否正确。");
+                        return;
+                    }
+                    
+                    // 还原应用状态
+                    document.getElementById('docTitleInput').value = data.metadata.title || '卷内文件目录';
+                    document.getElementById('startPageInput').value = data.metadata.startPage || 1;
+                    templates = data.templates || [];
+                    
+                    // 反序列化目录树结构并映射回当前扁平 UI 模型
+                    rows = (data.tree && data.tree.children) ? data.tree.children.map(child => {
+                        const { expanded, children, ...rest } = child;
+                        return rest;
+                    }) : [];
+                    
+                    renderTemplates();
+                    renderRows();
+                    updatePreview();
+                    alert("目录项目加载成功！");
+                } catch (err) {
+                    alert("文件解析失败：" + err.message);
+                }
+            };
+            reader.readAsText(file);
+        };
+        input.click();
+    }
+
+    // --- 核心逻辑：渲染行 ---
+    function renderRows() {
+        const container = document.getElementById('rowsContainer');
+        let html = '';
+        
+        rows.forEach((row, index) => {
+            let [y, m, d] = ['', '', ''];
+            if (row.date) {
+                const parts = row.date.split('-');
+                if (parts.length === 3) {
+                    y = parts[0];
+                    m = parts[1];
+                    d = parts[2];
+                }
+            }
+
+            html += `
+            <div class="data-row" draggable="true" data-id="${row.id}" ondragstart="handleDragStart(event)" ondragover="handleDragOver(event)" ondrop="handleDrop(event)">
+                <div class="row-index" title="拖拽排序">${index + 1}</div>
+                <input class="cell-input" value="${escapeHtml(row.no)}" placeholder="文号" oninput="updateRow('${row.id}', 'no', this.value)">
+                <input class="cell-input" value="${escapeHtml(row.name)}" placeholder="文书名称" oninput="updateRow('${row.id}', 'name', this.value)">
+                
+                <div class="date-group">
+                    <input class="date-input" type="number" placeholder="YYYY" value="${y}" maxlength="4" 
+                        oninput="handleDateInput(this, '${row.id}', 'y')" style="width: 45%">
+                    <span class="date-separator">-</span>
+                    <input class="date-input" type="number" placeholder="MM" value="${m}" maxlength="2" 
+                        oninput="handleDateInput(this, '${row.id}', 'm')" style="width: 25%">
+                    <span class="date-separator">-</span>
+                    <input class="date-input" type="number" placeholder="DD" value="${d}" maxlength="2" 
+                        oninput="handleDateInput(this, '${row.id}', 'd')" style="width: 25%">
+                </div>
+
+                <input class="cell-input" type="number" value="${row.pages}" placeholder="0" style="text-align:center" oninput="updateRow('${row.id}', 'pages', this.value)">
+                <input class="cell-input" value="${escapeHtml(row.remark)}" placeholder="备注" oninput="updateRow('${row.id}', 'remark', this.value)">
+                <div class="btn-icon" onclick="deleteRow('${row.id}')">🗑️</div>
+            </div>
+            `;
+        });
+        container.innerHTML = html;
+        updatePreview();
+    }
+
+    function handleDateInput(el, id, part) {
+        let val = el.value.replace(/\D/g, '');
+        el.value = val;
+
+        const row = rows.find(r => r.id === id);
+        if (!row) return;
+
+        let [y, m, d] = row.date ? row.date.split('-') : ['', '', ''];
+        
+        if (part === 'y') y = val;
+        if (part === 'm') m = val;
+        if (part === 'd') d = val;
+
+        if (part === 'm' && parseInt(m) > 12) m = '12';
+        if (part === 'd' && parseInt(d) > 31) d = '31';
+
+        row.date = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+        
+        if (part === 'y' && val.length === 4) {
+            el.nextElementSibling.nextElementSibling.focus();
+        } else if (part === 'm' && val.length === 2) {
+            el.nextElementSibling.nextElementSibling.focus();
+        }
+
+        updatePreviewDebounced();
+    }
+
+    function updateRow(id, field, value) {
+        const row = rows.find(r => r.id === id);
+        if (row) {
+            row[field] = value;
+            updatePreviewDebounced();
+        }
+    }
+
+    function addRow() {
+        rows.push({
+            id: Date.now().toString(),
+            no: '', name: '', date: '', pages: 1, remark: ''
+        });
+        renderRows();
+        setTimeout(() => {
+            const wrapper = document.querySelector('.table-scroll-wrapper');
+            wrapper.scrollTop = wrapper.scrollHeight;
+        }, 100);
+    }
+
+    function deleteRow(id) {
+        rows = rows.filter(r => r.id !== id);
+        renderRows();
+    }
+
+    function recalcPages() {
+        renderRows();
+    }
+
+    let dragSrcId = null;
+    function handleDragStart(e) {
+        dragSrcId = e.currentTarget.dataset.id;
+        e.currentTarget.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+    }
+    function handleDragOver(e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+    }
+    function handleDrop(e) {
+        e.preventDefault();
+        const targetId = e.currentTarget.dataset.id;
+        if (dragSrcId && dragSrcId !== targetId) {
+            const srcIndex = rows.findIndex(r => r.id === dragSrcId);
+            const targetIndex = rows.findIndex(r => r.id === targetId);
+            const [movedItem] = rows.splice(srcIndex, 1);
+            rows.splice(targetIndex, 0, movedItem);
+            renderRows();
+        }
+        document.querySelectorAll('.dragging').forEach(el => el.classList.remove('dragging'));
+    }
+
+    function renderTemplates() {
+        const list = document.getElementById('templateList');
+        list.innerHTML = templates.map((tpl, idx) => `
+            <div class="template-tag" onclick="applyTemplate('${escapeHtml(tpl)}')">
+                ${escapeHtml(tpl)}
+                <span class="del-btn" onclick="event.stopPropagation(); removeTemplate(${idx})">×</span>
+            </div>
+        `).join('');
+    }
+
+    function addTemplate() {
+        const input = document.getElementById('newTplInput');
+        const val = input.value.trim();
+        if (val && !templates.includes(val)) {
+            templates.push(val);
+            localStorage.setItem('ws_templates', JSON.stringify(templates));
+            renderTemplates();
+            input.value = '';
+        }
+    }
+
+    function removeTemplate(idx) {
+        templates.splice(idx, 1);
+        localStorage.setItem('ws_templates', JSON.stringify(templates));
+        renderTemplates();
+    }
+
+    function resetTemplates() {
+        if(confirm('确定重置为默认模板吗？')) {
+            templates = ["询问笔录", "行政处罚决定书", "证据先行登记保存决定书", "送达回执", "现场笔录"];
+            localStorage.setItem('ws_templates', JSON.stringify(templates));
+            renderTemplates();
+        }
+    }
+
+    function applyTemplate(text) {
+        if (currentFocusedInput) {
+            currentFocusedInput.value = text;
+            const event = new Event('input', { bubbles: true });
+            currentFocusedInput.dispatchEvent(event);
+            currentFocusedInput.focus();
+        } else {
+            alert('请先点击表格中需要填入内容的单元格');
+        }
+    }
+
+    let previewTimeout;
+    function updatePreviewDebounced() {
+        clearTimeout(previewTimeout);
+        previewTimeout = setTimeout(updatePreview, 300);
+    }
+
+    function updatePreviewTitle(val) {
+        const el = document.getElementById('previewTitleText');
+        if(el) el.innerText = val;
+    }
+
+    function updatePreview() {
+        const title = document.getElementById('docTitleInput').value;
+        const startPage = parseInt(document.getElementById('startPageInput').value) || 1;
+        const container = document.getElementById('previewContainer');
+        
+        let currentPage = startPage;
+        let totalRows = 0;
+        let htmlRows = '';
+        
+        rows.forEach(row => {
+            const pages = parseInt(row.pages) || 0;
+            let pageStr = '';
+            if (pages > 0) {
+                const s = currentPage;
+                const e = currentPage + pages - 1;
+                pageStr = pages === 1 ? `${s}` : `${s}-${e}`;
+                currentPage += pages;
+            }
+            
+            htmlRows += `
+                <tr>
+                    <td>${totalRows + 1}</td>
+                    <td>${escapeHtml(row.no)}</td>
+                    <td class="text-left">${escapeHtml(row.name)}</td>
+                    <td>${row.date}</td>
+                    <td>${pageStr}</td>
+                    <td class="text-left">${escapeHtml(row.remark)}</td>
+                </tr>
+            `;
+            totalRows++;
+        });
+
+        const totalPages = currentPage - startPage;
+        htmlRows += `
+            <tr>
+                <td colspan="4" style="text-align:right; padding-right:10px;">合计：</td>
+                <td>${totalPages} 页</td>
+                <td></td>
+            </tr>
+        `;
+
+        const tableHtml = `
+            <div class="doc-title" id="previewTitleText">${title}</div>
+            <table class="doc-table">
+                <thead>
+                    <tr>
+                        <th style="width:40px">序号</th>
+                        <th style="width:100px">文号</th>
+                        <th>文书名称</th>
+                        <th style="width:80px">日期</th>
+                        <th style="width:60px">页码</th>
+                        <th>备注</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${htmlRows}
+                </tbody>
+            </table>
+        `;
+
+        container.innerHTML = `<div class="a4-page">${tableHtml}</div>`;
+    }
+
+    async function handleExport() {
+        if (isDocxLoaded) {
+            exportDocx();
+        } else {
+            copyTableToClipboard();
+        }
+    }
+
+    async function exportDocx() {
+        const loading = document.getElementById('loadingMask');
+        const loadingText = document.getElementById('loadingText');
+        loading.style.display = 'flex';
+        loadingText.innerText = "正在生成 DOCX...";
+        
+        try {
+            if (typeof docx === 'undefined') throw new Error("Library not found");
+
+            const { Document, Packer, Paragraph, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle, TextRun } = docx;
+
+            const title = document.getElementById('docTitleInput').value;
+            const startPage = parseInt(document.getElementById('startPageInput').value) || 1;
+
+            const borders = {
+                top: { style: BorderStyle.SINGLE, size: 1, color: "000000" },
+                bottom: { style: BorderStyle.SINGLE, size: 1, color: "000000" },
+                left: { style: BorderStyle.SINGLE, size: 1, color: "000000" },
+                right: { style: BorderStyle.SINGLE, size: 1, color: "000000" },
+            };
+
+            const createCell = (text, width, isHeader = false, align = AlignmentType.CENTER) => {
+                return new TableCell({
+                    borders: borders,
+                    width: { size: width, type: WidthType.DXA },
+                    children: [
+                        new Paragraph({
+                            alignment: align,
+                            children: [
+                                new TextRun({
+                                    text: text || "",
+                                    size: 21, 
+                                    font: "宋体",
+                                    bold: isHeader
+                                })
+                            ]
+                        })
+                    ]
+                });
+            };
+
+            const headerRow = new TableRow({
+                children: [
+                    createCell("序号", 800, true),
+                    createCell("文件编号/文号", 1600, true),
+                    createCell("行政处罚文书名称", 3000, true, AlignmentType.LEFT),
+                    createCell("日期", 1200, true),
+                    createCell("页码", 1000, true),
+                    createCell("备注", 1400, true),
+                ]
+            });
+
+            let currentPage = startPage;
+            let totalPages = 0;
+            const dataRows = rows.map((row, index) => {
+                const pages = parseInt(row.pages) || 0;
+                totalPages += pages;
+                let pageStr = "";
+                if (pages > 0) {
+                    const s = currentPage;
+                    const e = currentPage + pages - 1;
+                    pageStr = pages === 1 ? `${s}` : `${s}-${e}`;
+                    currentPage += pages;
+                }
+
+                return new TableRow({
+                    children: [
+                        createCell(`${index + 1}`, 800),
+                        createCell(row.no, 1600),
+                        createCell(row.name, 3000, false, AlignmentType.LEFT),
+                        createCell(row.date, 1200),
+                        createCell(pageStr, 1000),
+                        createCell(row.remark, 1400),
+                    ]
+                });
+            });
+
+            const totalRow = new TableRow({
+                children: [
+                    new TableCell({
+                        borders: borders,
+                        columnSpan: 4,
+                        children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: "合计：", bold: true, size: 21, font: "宋体" })] })]
+                    }),
+                    createCell(`${totalPages} 页`, 1000, true),
+                    createCell("", 1400),
+                ]
+            });
+
+            const table = new Table({
+                rows: [headerRow, ...dataRows, totalRow],
+                width: { size: 9026, type: WidthType.DXA },
+            });
+
+            const doc = new Document({
+                sections: [{
+                    properties: {
+                        page: {
+                            margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 },
+                        }
+                    },
+                    children: [
+                        new Paragraph({
+                            alignment: AlignmentType.CENTER,
+                            spacing: { after: 200 },
+                            children: [new TextRun({ text: title, bold: true, size: 36, font: "黑体" })]
+                        }),
+                        table
+                    ]
+                }]
+            });
+
+            const blob = await Packer.toBlob(doc);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${title}.docx`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+        } catch (err) {
+            console.error(err);
+            alert("导出 DOCX 失败，已自动切换为复制模式。\n错误信息：" + err.message);
+            copyTableToClipboard();
+        } finally {
+            loading.style.display = 'none';
+        }
+    }
+
+    function copyTableToClipboard() {
+        const loading = document.getElementById('loadingMask');
+        const loadingText = document.getElementById('loadingText');
+        loading.style.display = 'flex';
+        loadingText.innerText = "正在复制到剪贴板...";
+
+        try {
+            const title = document.getElementById('docTitleInput').value;
+            let html = `<h2 style="text-align:center">${title}</h2>`;
+            html += `<table border="1" style="border-collapse:collapse; width:100%; font-family:SimSun;">`;
+            html += `<thead><tr><th>序号</th><th>文号</th><th>文书名称</th><th>日期</th><th>页码</th><th>备注</th></tr></thead><tbody>`;
+            
+            let currentPage = parseInt(document.getElementById('startPageInput').value) || 1;
+            rows.forEach((row, i) => {
+                const pages = parseInt(row.pages) || 0;
+                let pageStr = '';
+                if (pages > 0) {
+                    const s = currentPage;
+                    const e = currentPage + pages - 1;
+                    pageStr = pages === 1 ? `${s}` : `${s}-${e}`;
+                    currentPage += pages;
+                }
+                html += `<tr>
+                    <td style="padding:5px">${i+1}</td>
+                    <td style="padding:5px">${row.no}</td>
+                    <td style="padding:5px;text-align:left">${row.name}</td>
+                    <td style="padding:5px">${row.date}</td>
+                    <td style="padding:5px">${pageStr}</td>
+                    <td style="padding:5px">${row.remark}</td>
+                </tr>`;
+            });
+            html += `</tbody></table>`;
+
+            const blob = new Blob([html], { type: 'text/html' });
+            const item = new ClipboardItem({ 'text/html': blob });
+            navigator.clipboard.write([item]).then(() => {
+                alert('表格已复制到剪贴板！\n请直接打开 Word 文档并按 Ctrl+V 粘贴。');
+            }).catch(err => {
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = html;
+                document.body.appendChild(tempDiv);
+                const range = document.createRange();
+                range.selectNodeContents(tempDiv);
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+                document.execCommand('copy');
+                document.body.removeChild(tempDiv);
+                alert('表格已复制（兼容模式）！\n请打开 Word 文档并按 Ctrl+V 粘贴。');
+            });
+
+        } catch (e) {
+            alert('复制失败，请手动截图或检查浏览器权限。');
+        } finally {
+            loading.style.display = 'none';
+        }
+    }
+
+    function saveTemplate() {
+        localStorage.setItem('ws_case_data', JSON.stringify(rows));
+        alert('当前列表已保存到本地！');
+    }
+
+    function loadTemplate() {
+        const data = localStorage.getItem('ws_case_data');
+        if (data) {
+            rows = JSON.parse(data);
+            renderRows();
+        } else {
+            alert('没有保存的数据。');
+        }
+    }
+
+    function escapeHtml(text) {
+        if (!text) return "";
+        return text.replace(/&/g, "&amp;")
+                   .replace(/</g, "&lt;")
+                   .replace(/>/g, "&gt;")
+                   .replace(/"/g, "&quot;")
+                   .replace(/'/g, "&#039;");
+    }
+</script>
+
+</body>
+</html>
